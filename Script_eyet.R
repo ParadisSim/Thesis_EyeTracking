@@ -5,7 +5,15 @@ library(eyetrackingR)
 library(devtools)
 #install_github("tmalsburg/saccades/saccades", dependencies=TRUE)
 library(saccades)
+#install.packages('eyetrackingR')
+library(eyetrackingR)
 
+
+data <- analyse_prelim_mai_2025
+data_for_condi <- data %>% mutate(condi = paste(voice_int, face_int, emotion))
+
+
+#---------------------------- SACCADES PACKAGE ----------------
 #Analyses are threefold. One with silence, one with neutral voices and one with emotional voices. 
 #As of 2025-05-22 we will experiment on the later (emotional) block
 
@@ -15,7 +23,7 @@ View(samples)
 
 #Filtering for stimulus also messes up the time?
 #data <- analyse_prelim_mai_2025%>% filter(CurrentObject == "Stimulus")
-data <- analyse_prelim_mai_2025
+
 
 #We must create a file from our raw data having the 1) time, 2) x pos of the eyes, 3) y pos of the eyes, 4) trial
 
@@ -69,17 +77,49 @@ diagnostic.plot(data_fixation_detection,event_fixed,interactive = FALSE,start.ti
 ok <- saccades::calculate.summary(fixed)
 #Ici, on dirait que cest les croix de fixations qui sont longues. On pourrait essayer de les preprocess en enlevant
 
-
-#À faire maintenant 
-#Voir si on peut retourner aux fixations avec le dataframe original et voir comment généraliser facilement avec tous les participants
+#Now, since the package cannot handle ++ subjects and condition, we will test other methods before trying to revert find what were condition and participant numbers.
 
 
+#----------------- Eyetracking R------------------
+
+#Validity right et left - 0 c'est bon. Si jamais trop peu de données ainsi, voir : https://researchwiki.solo.universiteitleiden.nl/xwiki/wiki/researchwiki.solo.universiteitleiden.nl/download/Software/E-Prime/E-Prime%20and%20Tobii/WebHome/eet_2_user_guide14052019.pdf?rev=1.1
+#Faire validity right == 0 & validity left == 0
+#Ensuite voir si TETTime est ok
+
+#Clean data by adding a trackloss column (False if 0, 0 and true otherwise)
+
+data_trackloss <- data_for_condi %>% mutate(TrackL = ValidityLeftEye != 0 | ValidityRightEye != 0)
+data_trackloss %>% filter(TrackL == TRUE)
+
+#Add 2 AOIcolumns (Neutral, Emotional) et mettre true si neutral est regardé, true si emotional est regardé
+
+data_processed <- data_trackloss %>% mutate(Neutral = AOIStimulus == "Neutral", Emotional = AOIStimulus == "Emotional")
+
+
+data_processed_no_cross <- data_processed %>% filter(CurrentObject == "Stimulus") 
+
+unique(data_processed_no_cross %>% filter(Session != 1 & Session !=2) %>% select(Subject, Session))
+#Make trials go from 1 to 1120 for each part.
+#Lets temprarily not fix and just not analyse those
+
+#9 = 1121, 14,18,19,21,22,25 on plusieurs restart a fix
+data_processed_no_cross <- data_processed_no_cross %>% filter(Subject != 9,Subject != 14, Subject != 18 ,Subject != 19, Subject != 21, Subject != 22, Subject != 25)
+
+data_processed_no_cross <- data_processed_no_cross %>% mutate(unique_trial = as.numeric(TrialId) + 560*(as.numeric(Session)-1))
+
+data_processed_no_cross %>% group_by(Subject,TrialId) %>% summarise(count = length(unique(TrialId))) %>% summary()
+data_processed_no_cross %>% group_by(Subject,unique_trial) %>% summarise(count = length(unique(unique_trial))) %>% summary()
 
 
 
+data_processed_no_cross %>% group_by(Subject)TrialIddata_processed_no_cross %>% group_by(Subject) %>% summary(count = unique_trial)
 
-
-
-
+data_eye <- make_eyetrackingr_data(data_processed_no_cross, 
+                               participant_column = "Subject",
+                               trial_column =  "unique_trial",
+                               time_column = "RTTime",
+                               trackloss_column = "TrackL",
+                               aoi_columns = c('Neutral','Emotional'),
+                               treat_non_aoi_looks_as_missing = TRUE)
 
 
