@@ -7,10 +7,19 @@ library(devtools)
 library(saccades)
 #install.packages('eyetrackingR')
 library(eyetrackingR)
-
+library(ggplot2)
 
 data <- analyse_prelim_mai_2025
 data_for_condi <- data %>% mutate(condi = paste(voice_int, face_int, emotion))
+
+#Dont know why but some current objects where NA ? Maybe pauses ?
+data_for_condi <- data_for_condi %>% filter(!is.na(CurrentObject)) %>% filter(CurrentObject == "Stimulus")
+
+data_rephasetime <- data_for_condi %>%
+  group_by(condi) %>%
+  mutate(time_rebased = RTTime - first(RTTime)) %>%
+  ungroup()
+
 
 
 #---------------------------- SACCADES PACKAGE ----------------
@@ -19,7 +28,6 @@ data_for_condi <- data %>% mutate(condi = paste(voice_int, face_int, emotion))
 
 #To note, more on validity etc needs to be read. The first analyses will be simple to test the saccades package.
 
-View(samples)
 
 #Filtering for stimulus also messes up the time?
 #data <- analyse_prelim_mai_2025%>% filter(CurrentObject == "Stimulus")
@@ -39,9 +47,11 @@ View(samples)
 #Here we proceed to have condition numbers as a product of a unique number associated with every possible conditions
 data_for_condi <- data %>% mutate(condi = paste(voice_int, face_int, emotion))
 
-data_numbertrials <- as.data.frame(data_numbertrials %>% mutate(condi = unique(data_for_condi$condi)))
+
+data_numbertrials <- as.data.frame(unique(data_for_condi$condi))
 data_numbertrials <- data_numbertrials %>% mutate(numberCondi = row_number())
-data_numbertrials <- data_numbertrials %>% filter(numberCondi != 141) %>% select(condi,numberCondi)
+data_numbertrials <- data_numbertrials %>% filter(numberCondi != 141)
+data_numbertrials <- set_names(data_numbertrials, c("condi","numberCondi"))
 
 #The merge here is responsible to associate the unique number everytime the character concatenation is seen in the original
 data_with_trials <- merge(data_numbertrials, data_for_condi, by = "condi")
@@ -76,7 +86,7 @@ diagnostic.plot(data_fixation_detection,event_fixed,interactive = FALSE,start.ti
 
 ok <- saccades::calculate.summary(fixed)
 #Ici, on dirait que cest les croix de fixations qui sont longues. On pourrait essayer de les preprocess en enlevant
-
+ok
 #Now, since the package cannot handle ++ subjects and condition, we will test other methods before trying to revert find what were condition and participant numbers.
 
 
@@ -88,38 +98,95 @@ ok <- saccades::calculate.summary(fixed)
 
 #Clean data by adding a trackloss column (False if 0, 0 and true otherwise)
 
-data_trackloss <- data_for_condi %>% mutate(TrackL = ValidityLeftEye != 0 | ValidityRightEye != 0)
+data_trackloss <- data_rephasetime %>% mutate(TrackL = !(ValidityLeftEye == 0 & ValidityRightEye == 0))
 data_trackloss %>% filter(TrackL == TRUE)
 
 #Add 2 AOIcolumns (Neutral, Emotional) et mettre true si neutral est regardé, true si emotional est regardé
 
-data_processed <- data_trackloss %>% mutate(Neutral = AOIStimulus == "Neutral", Emotional = AOIStimulus == "Emotional")
+data_processed <- data_trackloss %>% mutate(Neutral = AOIStimulus == "Neutral", Emotion = AOIStimulus == "Emotion")
 
 
-data_processed_no_cross <- data_processed %>% filter(CurrentObject == "Stimulus") 
 
-unique(data_processed_no_cross %>% filter(Session != 1 & Session !=2) %>% select(Subject, Session))
+unique(data_processed %>% filter(Session != 1 & Session !=2) %>% select(Subject, Session))
 #Make trials go from 1 to 1120 for each part.
 #Lets temprarily not fix and just not analyse those
 
 #9 = 1121, 14,18,19,21,22,25 on plusieurs restart a fix
-data_processed_no_cross <- data_processed_no_cross %>% filter(Subject != 9,Subject != 14, Subject != 18 ,Subject != 19, Subject != 21, Subject != 22, Subject != 25)
+data_processed_no_weird <- data_processed %>% filter(Subject != 9,Subject != 14, Subject != 18 ,Subject != 19, Subject != 21, Subject != 22, Subject != 25)
 
-data_processed_no_cross <- data_processed_no_cross %>% mutate(unique_trial = as.numeric(TrialId) + 560*(as.numeric(Session)-1))
+data_p <- data_processed_no_weird %>% mutate(unique_trial = as.numeric(TrialId) + 560*(as.numeric(Session)-1))
 
-data_processed_no_cross %>% group_by(Subject,TrialId) %>% summarise(count = length(unique(TrialId))) %>% summary()
-data_processed_no_cross %>% group_by(Subject,unique_trial) %>% summarise(count = length(unique(unique_trial))) %>% summary()
+data_p %>% group_by(Subject,TrialId) %>% summarise(count = length(unique(TrialId))) %>% summary()
+data_p %>% group_by(Subject,unique_trial) %>% summarise(count = length(unique(unique_trial))) %>% summary()
+
+#Time column doit être from trial onset. Donc on devrait prendre le temps à la première mention de fixation et à la dernière de 0 à x...
 
 
 
-data_processed_no_cross %>% group_by(Subject)TrialIddata_processed_no_cross %>% group_by(Subject) %>% summary(count = unique_trial)
-
-data_eye <- make_eyetrackingr_data(data_processed_no_cross, 
+data_eye <- make_eyetrackingr_data(data_p, 
                                participant_column = "Subject",
                                trial_column =  "unique_trial",
-                               time_column = "RTTime",
+                               time_column = "time_rebased",
                                trackloss_column = "TrackL",
-                               aoi_columns = c('Neutral','Emotional'),
+                               aoi_columns = c('Neutral','Emotion'),
                                treat_non_aoi_looks_as_missing = TRUE)
+
+data_eye2 <- make_eyetrackingr_data(data_p, 
+                                   participant_column = "Subject",
+                                   trial_column =  "unique_trial",
+                                   time_column = "time_rebased",
+                                   trackloss_column = "TrackL",
+                                   aoi_columns = c('Neutral','Emotion'),
+                                   treat_non_aoi_looks_as_missing = FALSE)
+
+
+response_window_eye <- subset_by_window(data_eye, 
+                                    window_start_time = 0,
+                                    window_end_time = 2000,
+                                    rezero = FALSE)
+
+
+
+response_window_clean <- clean_by_trackloss(data = response_window_eye, trial_prop_thresh = .25)
+
+
+response_time <- make_time_sequence_data(response_window_clean, time_bin_size = 50,
+                                         predictor_columns = c("emotion"),
+                                         aois = "Emotion"
+)
+
+# visualize time results
+plot(response_time, predictor_column = "emotion") + 
+  theme_light() +
+  coord_cartesian(ylim = c(0,1))
+
+
+
+#Visualize baseline
+response_time <- make_time_sequence_data(response_window_clean, time_bin_size = 100, 
+                                         aois = "Emotion"
+)
+
+# visualize time results
+plot(response_time) + 
+  theme_light() +
+  coord_cartesian(ylim = c(0,1))
+
+factor(response_window_clean$lateralisation)
+response_window_clean <- response_window_clean %>% mutate(int_f = factor(face_int))
+
+
+
+response_time2 <- make_time_sequence_data(response_window_clean, time_bin_size = 50, 
+                                         predictor_columns = c("int_f"),
+                                         aois = "Emotion"
+)
+
+# visualize time results
+plot(response_time2, predictor_column = "int_f") + 
+  theme_light() +
+  coord_cartesian(ylim = c(0,1))
+
+
 
 
