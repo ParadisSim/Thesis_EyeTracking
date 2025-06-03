@@ -8,8 +8,12 @@ library(saccades)
 #install.packages('eyetrackingR')
 library(eyetrackingR)
 library(ggplot2)
-install.packages('cowplot')
+#install.packages('cowplot')
 library(cowplot)
+install.packages("lme4")
+library(lme4)
+install.packages("car")
+library(car)
 
 data <- analyse_prelim_mai_2025
 data_for_condi <- data %>% mutate(condi = paste(voice_int, face_int, emotion))
@@ -199,11 +203,37 @@ response_window_eye2 <- subset_by_window(data_eye2,
 response_window_clean2 <- clean_by_trackloss(data = response_window_eye2, trial_prop_thresh = .25)
 
 
+factor(response_window_clean2$lateralisation)
 
-response_time2 <- make_time_sequence_data(response_window_clean2, time_bin_size = 50,
-                                         predictor_columns = c("emotion"),
+response_window_cleanx <- response_window_clean2 %>% mutate(int_f = factor(face_int),int_v = factor(voice_int, levels =c("ence", "0", "20", "40", "60", "80", "100"))) 
+
+
+response_time2 <- make_time_sequence_data(response_window_cleanx, time_bin_size = 50,
+                                         predictor_columns = c("emotion","int_f","int_v","condi"),
                                          aois = "Emotion"
 )
+
+model <- lmer(Elog ~ int_f*int_v*emotion + (1 | condi) + (1 | Subject), data = response_time2, REML = FALSE)
+summary(model)
+Anova(model, type = 3)
+
+#juste avec random subject
+model_f <- lmer(Elog ~ int_f*(ot1 + ot2) + int_v*(ot1 + ot2)+emotion*(ot1 + ot2)+ (1 + ot1 + ot2 | Subject), data = response_time2, REML = FALSE)
+#fail to converge
+#See what is elog and if thats a proper analysis for my needs ?
+Anova(model_f, type = 3)
+
+plot(response_time2, predictor_column = "int_f", dv = "Elog", model = model_f) +
+  theme_light()
+
+
+
+
+
+
+
+
+
 
 # visualize time results
 plot(response_time2, predictor_column = "emotion") + 
@@ -212,10 +242,6 @@ plot(response_time2, predictor_column = "emotion") +
 
 
 
-
-factor(response_window_clean2$lateralisation)
-
-response_window_cleanx <- response_window_clean2 %>% mutate(int_f = factor(face_int),int_v = factor(voice_int, levels =c("ence", "0", "20", "40", "60", "80", "100"))) 
 
 
 
